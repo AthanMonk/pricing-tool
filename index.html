@@ -168,7 +168,8 @@ function PriceCalculator() {
     try {
       setLoading(true);
       setError(null);
-      const response = await fetch('pricing_data.json');
+      // Update the fetch path to work with GitHub Pages
+      const response = await fetch('./pricing_data.json');
       if (!response.ok) throw new Error('Failed to load pricing data');
       const data = await response.json();
       setPricingData(data);
