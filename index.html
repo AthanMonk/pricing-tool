@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pricing Tool</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            dark: {
+              100: '#1a1b1e',
+              200: '#2c2e33',
+              300: '#3d4147',
+              400: '#5c636e',
+            },
+            accent: {
+              primary: '#60a5fa',
+              secondary: '#34d399',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="dark bg-dark-100 text-gray-100">
+  <div id="root"></div>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script async src="https://ga.jspm.io/npm:es-module-shims@1.7.0/dist/es-module-shims.js"></script>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react?dev",
+    "react-dom/client": "https://esm.sh/react-dom/client?dev"
+  }
+}
+</script>
+<script type="text/babel" data-type="module">
+import React, { StrictMode, useState, useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+
+// Loading spinner component
+const LoadingSpinner = () => (
+  <div className="flex items-center justify-center min-h-screen">
+    <div className="animate-spin rounded-full h-12 w-12 border-4 border-accent-primary border-t-transparent"></div>
+  </div>
+);
+
+// Error message component
+const ErrorMessage = ({ message, onRetry }) => (
+  <div className="flex flex-col items-center justify-center min-h-screen p-4">
+    <div className="text-red-400 text-xl mb-4">
+      <i className="fas fa-exclamation-circle mr-2"></i>
+      {message}
+    </div>
+    {onRetry && (
+      <button
+        onClick={onRetry}
+        className="px-4 py-2 bg-accent-primary text-white rounded-lg hover:bg-blue-700 transition-colors"
+      >
+        <i className="fas fa-redo mr-2"></i>
+        Retry
+      </button>
+    )}
+  </div>
+);
+
+// Selection button component with optional tooltip
+const SelectionButton = ({ selected, onClick, children, className = "", icon = null, tooltip = null }) => (
+  <button
+    className={`relative px-4 py-2 rounded-lg border text-sm transition-all duration-200 ${
+      selected
+        ? 'border-accent-primary bg-dark-200 text-accent-primary font-medium shadow-lg shadow-accent-primary/10'
+        : 'border-dark-300 hover:border-accent-primary hover:bg-dark-200'
+    } ${className}`}
+    onClick={onClick}
+    title={tooltip}
+  >
+    {icon && <i className={`${icon} mr-2`}></i>}
+    {children}
+  </button>
+);
+
+// Product type tabs component
+const ProductTabs = ({ products, selected, onSelect }) => (
+  <div className="mb-4 -mx-6 px-6 py-2 bg-dark-200 overflow-x-auto whitespace-nowrap sticky top-0 z-10">
+    <div className="flex space-x-2">
+      {Object.keys(products).map(productName => (
+        <button
+          key={productName}
+          onClick={() => onSelect(productName)}
+          className={`px-4 py-2 rounded-lg transition-all duration-200 text-sm ${
+            selected === productName
+              ? 'bg-accent-primary text-white font-medium'
+              : 'text-gray-400 hover:text-white hover:bg-dark-300'
+          }`}
+        >
+          {productName}
+        </button>
+      ))}
+    </div>
+  </div>
+);
+
+// Category section component
+const CategorySection = ({ title, icon, children }) => (
+  <div className="mb-6 last:mb-0">
+    <h3 className="text-sm font-medium text-accent-primary mb-3 flex items-center">
+      <i className={`${icon} mr-2`}></i>
+      {title}
+    </h3>
+    <div className="space-y-4">
+      {children}
+    </div>
+  </div>
+);
+
+// Field group component
+const FieldGroup = ({ label, icon, children, tooltip = null }) => (
+  <div className="relative">
+    <label className="block text-xs font-medium text-gray-400 mb-2 flex items-center">
+      <i className={`${icon} mr-2`}></i>
+      {label}
+      {tooltip && (
+        <i className="fas fa-info-circle ml-1 text-gray-500 hover:text-accent-primary cursor-help"
+           title={tooltip}
+        />
+      )}
+    </label>
+    <div className="grid grid-cols-2 sm:grid-cols-auto-fit gap-2 items-center">
+      {children}
+    </div>
+  </div>
+);
+
+// Quantity selector component
+const QuantitySelector = ({ quantities, selected, onChange }) => (
+  <div className="flex flex-wrap gap-2">
+    {quantities.map(qty => (
+      <SelectionButton
+        key={qty}
+        selected={selected === qty.toString()}
+        onClick={() => onChange(qty.toString())}
+        className="flex-1"
+      >
+        {parseInt(qty).toLocaleString()}
+      </SelectionButton>
+    ))}
+  </div>
+);
+
+// Main calculator component
+function PriceCalculator() {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [pricingData, setPricingData] = useState(null);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [formState, setFormState] = useState({});
+
+  const loadPricingData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await fetch('pricing_data.json');
+      if (!response.ok) throw new Error('Failed to load pricing data');
+      const data = await response.json();
+      setPricingData(data);
+      const firstProduct = Object.keys(data.products)[0];
+      setSelectedProduct(firstProduct);
+      initializeFormState(data.products[firstProduct]);
+    } catch (err) {
+      console.error('Loading error:', err);
+      setError(
+        `Unable to load pricing data. Please check if pricing_data.json exists and try again. 
+        Error: ${err.message}`
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const initializeFormState = (productData) => {
+    const initialState = {};
+    
+    // Find a valid price key first
+    const firstPriceKey = Object.keys(productData.prices)[0];
+    const keyParts = firstPriceKey.split('|').reduce((acc, part) => {
+      const [field, value] = part.split('=');
+      acc[field] = value;
+      return acc;
+    }, {});
+
+    // Set initial values that match our first valid price combination
+    Object.entries(productData.categories).forEach(([_, category]) => {
+      Object.entries(category.fields).forEach(([field, metadata]) => {
+        initialState[field] = keyParts[field] || metadata.values[0];
+      });
+    });
+
+    // Set initial quantity
+    const firstQuantity = Object.keys(productData.prices[firstPriceKey])[0];
+    initialState.quantity = firstQuantity;
+    
+    setFormState(initialState);
+  };
+
+  const getCurrentPrice = () => {
+    if (loading || error || !pricingData || !selectedProduct) return "0.00";
+    
+    try {
+      const productData = pricingData.products[selectedProduct];
+      
+      // Get all valid price keys
+      const priceKeys = Object.keys(productData.prices);
+      
+      // Build our current selection key
+      const currentKey = Object.entries(productData.categories)
+        .flatMap(([_, category]) =>
+          Object.keys(category.fields)
+            .map(field => `${field}=${formState[field]}`)
+        )
+        .sort() // Sort to ensure consistent ordering
+        .join('|');
+      
+      // Find matching price
+      const matchingKey = priceKeys.find(key => {
+        const sortedKey = key.split('|').sort().join('|');
+        return sortedKey === currentKey;
+      });
+      
+      if (!matchingKey) {
+        // If no exact match, find the closest valid combination
+        const validKey = priceKeys[0];
+        const validParts = validKey.split('|').reduce((acc, part) => {
+          const [field, value] = part.split('=');
+          acc[field] = value;
+          return acc;
+        }, {});
+        
+        // Update form state with valid values
+        setFormState(prev => ({
+          ...prev,
+          ...validParts
+        }));
+        
+        return productData.prices[validKey][formState.quantity].toFixed(2);
+      }
+      
+      const prices = productData.prices[matchingKey];
+      const price = prices[formState.quantity];
+      return price.toFixed(2);
+    } catch (error) {
+      console.error('Price calculation error:', error);
+      return "0.00";
+    }
+  };
+
+  const handleProductChange = (productName) => {
+    setSelectedProduct(productName);
+    initializeFormState(pricingData.products[productName]);
+  };
+
+  const handleOptionChange = (field, value) => {
+    setFormState(prev => {
+      const newState = { ...prev, [field]: value };
+      
+      // Validate the new combination
+      const productData = pricingData.products[selectedProduct];
+      const currentKey = Object.entries(productData.categories)
+        .flatMap(([_, category]) =>
+          Object.keys(category.fields)
+            .map(field => `${field}=${newState[field]}`)
+        )
+        .sort()
+        .join('|');
+        
+      const validKey = Object.keys(productData.prices).find(key => {
+        const sortedKey = key.split('|').sort().join('|');
+        return sortedKey === currentKey;
+      });
+      
+      if (!validKey) {
+        // If invalid combination, find a valid one that matches as much as possible
+        const validPriceKey = Object.keys(productData.prices).find(key => 
+          key.includes(`${field}=${value}`)
+        ) || Object.keys(productData.prices)[0];
+        
+        const validParts = validPriceKey.split('|').reduce((acc, part) => {
+          const [f, v] = part.split('=');
+          acc[f] = v;
+          return acc;
+        }, {});
+        
+        return {
+          ...newState,
+          ...validParts
+        };
+      }
+      
+      return newState;
+    });
+  };
+
+  useEffect(() => {
+    loadPricingData();
+  }, []);
+
+  const productData = pricingData?.products[selectedProduct];
+  const currentPrice = getCurrentPrice();
+  
+  // Get all available quantities across all price options
+  const quantities = Array.from(new Set(
+    Object.values(productData?.prices || {})
+      .flatMap(priceObj => Object.keys(priceObj))
+      .map(Number)
+      .sort((a, b) => a - b)
+  ));
+
+  if (loading) return <LoadingSpinner />;
+  if (error) return <ErrorMessage message={error} onRetry={loadPricingData} />;
+  if (!pricingData || !selectedProduct) return null;
+
+  return (
+    <div className="max-w-7xl mx-auto font-['Inter']">
+      {/* Header with Product Tabs */}
+      <div className="fixed top-0 left-0 right-0 bg-dark-100 z-20">
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <div className="flex justify-between items-center">
+            <h1 className="text-xl font-bold text-white">Print Calculator</h1>
+            <div className="text-2xl font-bold text-accent-primary">
+              {currentPrice === "N/A" ? "N/A" : `$${currentPrice}`}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="pt-20 px-4 pb-8">
+        {/* Product Selection */}
+        <ProductTabs
+          products={pricingData.products}
+          selected={selectedProduct}
+          onSelect={handleProductChange}
+        />
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Options Panel */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Categories */}
+            <div className="bg-dark-200 rounded-xl shadow-lg p-4">
+              {Object.entries(productData.categories).map(([categoryId, category]) => (
+                <CategorySection
+                  key={categoryId}
+                  title={category.name}
+                  icon={category.icon}
+                >
+                  {Object.entries(category.fields)
+                    .sort(([,a], [,b]) => a.order - b.order)
+                    .map(([field, metadata]) => (
+                      <FieldGroup
+                        key={field}
+                        label={field}
+                        icon={metadata.icon}
+                      >
+                        {metadata.values.map(value => (
+                          <SelectionButton
+                            key={value}
+                            selected={formState[field] === value}
+                            onClick={() => handleOptionChange(field, value)}
+                          >
+                            {value}
+                          </SelectionButton>
+                        ))}
+                      </FieldGroup>
+                    ))}
+                </CategorySection>
+              ))}
+              
+              {/* Quantity Selection */}
+              <CategorySection title="Order Quantity" icon="fas fa-sort-numeric-up">
+                <QuantitySelector
+                  quantities={quantities}
+                  selected={formState.quantity}
+                  onChange={(qty) => setFormState(prev => ({ ...prev, quantity: qty }))}
+                />
+              </CategorySection>
+            </div>
+          </div>
+
+          {/* Order Summary */}
+          <div className="bg-dark-200 rounded-xl shadow-lg p-4 lg:h-min sticky top-24">
+            <h2 className="text-lg font-semibold mb-4 text-white">
+              <i className="fas fa-clipboard-list mr-2"></i>
+              Order Summary
+            </h2>
+            
+            <div className="space-y-2 text-sm">
+              <div className="flex justify-between py-2 border-b border-dark-300">
+                <span className="text-gray-400">Product</span>
+                <span className="font-medium text-white">{selectedProduct}</span>
+              </div>
+              
+              {Object.entries(productData.categories).map(([_, category]) => (
+                Object.entries(category.fields).map(([field, metadata]) => (
+                  <div key={field} className="flex justify-between py-1 border-b border-dark-300/50">
+                    <span className="text-gray-400">
+                      <i className={`${metadata.icon} mr-2`}></i>
+                      {field}
+                    </span>
+                    <span className="font-medium text-white">{formState[field]}</span>
+                  </div>
+                ))
+              ))}
+              
+              <div className="flex justify-between py-1 border-b border-dark-300/50">
+                <span className="text-gray-400">
+                  <i className="fas fa-sort-numeric-up mr-2"></i>
+                  Quantity
+                </span>
+                <span className="font-medium text-white">
+                  {parseInt(formState.quantity).toLocaleString()}
+                </span>
+              </div>
+
+              <div className="flex justify-between items-center pt-4">
+                <span className="text-base font-medium text-white">Total Price</span>
+                <span className="text-2xl font-bold text-accent-primary">
+                  {currentPrice === "N/A" ? "N/A" : `$${currentPrice}`}
+                </span>
+              </div>
+            </div>
+
+            {/* Order Notes */}
+            <div className="mt-4 p-3 bg-dark-300 rounded-lg text-xs text-gray-400">
+              <p>* Prices are estimates and subject to change.</p>
+              <p>* Contact us for exact quotes and custom options.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Render the app
+const root = createRoot(document.getElementById('root'));
+root.render(
+  <StrictMode>
+    <PriceCalculator />
+  </StrictMode>
+);
+</script>
+<style>
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+}
+
+/* Custom scrollbar for dark mode */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1b1e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #3d4147;
+  border-radius: 5px;
+  border: 2px solid #1a1b1e;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #5c636e;
+}
+
+/* Grid template for auto-fit buttons */
+.grid-cols-auto-fit {
+  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+}
+</style>
+</html>
